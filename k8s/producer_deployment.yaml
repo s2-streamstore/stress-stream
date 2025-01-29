@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: stress
+  labels:
+    app.kubernetes.io/name: producer
+    app.kubernetes.io/part-of: stress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: producer
+      app.kubernetes.io/part-of: stress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: producer
+        app.kubernetes.io/part-of: stress
+    spec:
+      containers:
+        - name: producer
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          image: ghcr.io/s2-streamstore/stress-stream:latest
+          ports:
+            - name: metrics
+              containerPort: 8000
+          env:
+            - name: S2_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: s2-auth-token
+                  key: s2-auth-token
+          command:
+            - ".venv/bin/python"
+            - "-m"
+            - "stress_stream.producer"
+            - "--basin"
+            - "stress-basin"
+            - "--stream"
+            - "stress-stream"
+            - "--throughput"
+            - "1024"
+            - "--avg-record-size"
+            - "20"
+            - "--avg-batch-size"
+            - "1"
