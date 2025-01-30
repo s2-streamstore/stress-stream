@@ -33,8 +33,13 @@ append_latency_histogram = Histogram(
     namespace=METRICS_NAMESPACE,
     buckets=HISTOGRAM_BUCKETS,
 )
-append_errors_counter = Counter(
-    name="append_errors_total",
+appends_counter = Counter(
+    name="appends_total",
+    documentation="Total number of append operations.",
+    namespace=METRICS_NAMESPACE,
+)
+append_failures_counter = Counter(
+    name="append_failures_total",
     documentation="Total number of failed append operations.",
     namespace=METRICS_NAMESPACE,
 )
@@ -42,7 +47,8 @@ append_errors_counter = Counter(
 
 async def append(stream: Stream, input: AppendInput) -> None:
     start = datetime.now()
-    with append_errors_counter.count_exceptions():
+    with append_failures_counter.count_exceptions():
+        appends_counter.inc()
         output = await stream.append(input)
         appended_bytes_counter.inc(
             sum(
