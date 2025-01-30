@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: producer
     app.kubernetes.io/part-of: stress
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: producer
@@ -50,4 +50,5 @@ spec:
             - "--avg-record-size"
             - "20"
             - "--avg-batch-size"
-            - "1"
+            - "5"
+            - "--randomize"
