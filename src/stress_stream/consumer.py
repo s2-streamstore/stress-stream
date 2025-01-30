@@ -53,6 +53,7 @@ async def consumer(basin_name: str, stream_name: str):
         start_seq_num = await stream.check_tail()
         while True:
             try:
+                reads_counter.inc()
                 async for output in stream.read_session(start_seq_num):
                     reads_counter.inc()
                     match output:
