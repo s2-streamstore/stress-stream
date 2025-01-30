@@ -27,9 +27,14 @@ read_bytes_counter = Counter(
     documentation="Total number of bytes successfully read.",
     namespace=METRICS_NAMESPACE,
 )
-read_errors_counter = Counter(
-    name="read_errors_total",
-    documentation="Total number of failed read session operations.",
+reads_counter = Counter(
+    name="reads_total",
+    documentation="Total number of reads in read sessions.",
+    namespace=METRICS_NAMESPACE,
+)
+read_failures_counter = Counter(
+    name="read_failures_total",
+    documentation="Total number of failed reads in read sessions.",
     namespace=METRICS_NAMESPACE,
 )
 
@@ -46,11 +51,14 @@ async def consumer(basin_name: str, stream_name: str):
     async with S2(auth_token=S2_AUTH_TOKEN) as s2:
         stream = s2[basin_name][stream_name]
         start_seq_num = await stream.check_tail()
-        try:
-            with read_errors_counter.count_exceptions():
+        while True:
+            try:
                 async for output in stream.read_session(start_seq_num):
+                    reads_counter.inc()
                     match output:
                         case list(records):
+                            if len(records) > 0:
+                                start_seq_num = records[-1].seq_num + 1
                             read_records_counter.inc(len(records))
                             for record in records:
                                 observe_metrics(record)
@@ -59,10 +67,8 @@ async def consumer(basin_name: str, stream_name: str):
                                 "Unexpected output when reading from stream. "
                                 f"Expected a batch of records, but got {unexpected}"
                             )
-        finally:
-            # NB: The purpose of sleep here is to ensure that Prometheus gets a chance to scrape
-            # the read errors counter value.
-            await asyncio.sleep(100)
+            except Exception:
+                read_failures_counter.inc()
 
 
 async def consumer_and_metrics_server(basin_name: str, stream_name: str):
