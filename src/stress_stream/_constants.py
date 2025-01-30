@@ -4,6 +4,8 @@ S2_AUTH_TOKEN = os.getenv("S2_AUTH_TOKEN")
 
 METRICS_NAMESPACE = "stress"
 
+METRICS_LABELNAMES = ("basin", "stream")
+
 HISTOGRAM_BUCKETS = (
     0.010,
     0.020,

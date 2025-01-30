@@ -10,6 +10,7 @@ dependencies = [
     "streamstore>=1.1.0",
     "typer>=0.15.1",
     "uvicorn>=0.34.0",
+    "uvloop>=0.21.0",
 ]
 
 [dependency-groups]
