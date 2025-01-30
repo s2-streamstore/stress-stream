@@ -8,6 +8,7 @@ import typer
 from prometheus_client import Counter, Histogram
 from streamstore import S2, Stream
 from streamstore.schemas import AppendInput, Record
+from streamstore.utils import metered_bytes
 
 from stress_stream._constants import HISTOGRAM_BUCKETS, METRICS_NAMESPACE, S2_AUTH_TOKEN
 from stress_stream._utils import metrics_server
@@ -16,6 +17,8 @@ CYCLE_EVERY = 0.5  # 0.5s or 500ms
 MAX_JITTER = 0.2  # 0.2s or 200ms
 TIMESTAMP_HEADER_NUM_BYTES = 10
 
+MAX_BATCH_SIZE = 1000
+BATCH_MAX_METERED_BYTES = 1024 * 1024  # 1MiB
 
 appended_records_counter = Counter(
     name="appended_records_total",
@@ -70,17 +73,27 @@ async def produce_records(
     cur_cycle_num_bytes = 0
     append_coros = []
     while cur_cycle_num_bytes < per_cycle_target_num_bytes:
-        records = []
+        records: list[Record] = []
+        batch_metered_bytes = 0
         for _ in range(random.choice(batch_size)):
             record = Record(
                 body=os.urandom(random.choice(record_body_size)),
                 headers=[(b"ts", struct.pack("d", datetime.now().timestamp()))],
             )
-            records.append(record)
-            cur_cycle_num_bytes += len(record.body) + TIMESTAMP_HEADER_NUM_BYTES
-            if cur_cycle_num_bytes >= per_cycle_target_num_bytes:
+            record_metered_bytes = metered_bytes([record])
+            if (
+                batch_metered_bytes + record_metered_bytes <= BATCH_MAX_METERED_BYTES
+                and len(records) <= MAX_BATCH_SIZE
+            ):
+                records.append(record)
+                batch_metered_bytes += record_metered_bytes
+                cur_cycle_num_bytes += len(record.body) + TIMESTAMP_HEADER_NUM_BYTES
+                if cur_cycle_num_bytes >= per_cycle_target_num_bytes:
+                    break
+            else:
                 break
-        append_coros.append(append(stream, AppendInput(records)))
+        if len(records) > 0:
+            append_coros.append(append(stream, AppendInput(records)))
     await asyncio.gather(*append_coros, return_exceptions=True)
 
 
@@ -130,10 +143,14 @@ def main(
     throughput: int = typer.Option(..., help="Target throughput in bytes per second."),
     avg_record_size: int = typer.Option(
         ...,
-        help=f"Average size of each record in bytes. Must be greater than {TIMESTAMP_HEADER_NUM_BYTES} bytes.",
+        help=(
+            f"Average size of each record in bytes. Must be greater than {TIMESTAMP_HEADER_NUM_BYTES} bytes "
+            "and meet the limits mentioned in https://s2.dev/docs/limits#records."
+        ),
     ),
     avg_batch_size: int = typer.Option(
-        ..., help="Average number of records per batch. Must be greater than 0."
+        ...,
+        help="Average number of records per batch. Must meet the limits mentioned in https://s2.dev/docs/limits#records",
     ),
     randomize: bool = typer.Option(
         False,
