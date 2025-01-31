@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: express-consumer
+  namespace: stress
+  labels:
+    app.kubernetes.io/name: express-consumer
+    app.kubernetes.io/part-of: stress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: express-consumer
+      app.kubernetes.io/part-of: stress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: express-consumer
+        app.kubernetes.io/part-of: stress
+    spec:
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "s2"
+          effect: "NoSchedule"
+      containers:
+        - name: express-consumer
+          resources:
+            requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          image: ghcr.io/s2-streamstore/stress-stream:latest
+          ports:
+            - name: metrics
+              containerPort: 8000
+          env:
+            - name: S2_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: s2-auth-token
+                  key: s2-auth-token
+          command:
+            - ".venv/bin/python"
+            - "-m"
+            - "stress_stream.consumer"
+            - "--basin"
+            - "stress-basin"
+            - "--stream"
+            - "express-stream"
