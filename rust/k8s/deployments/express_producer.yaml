@@ -36,10 +36,10 @@ spec:
         - name: express-producer
           resources:
             requests:
-              cpu: "1"
+              cpu: "500m"
               memory: "1Gi"
             limits:
-              cpu: "1"
+              cpu: "500m"
               memory: "1Gi"
           image: ghcr.io/s2-streamstore/stress-stream-rs@sha256:0a6a3626fd976312330e81b4eaf6dcddcaca8beedcf322a6a055aa9ea2252e54
           ports:
