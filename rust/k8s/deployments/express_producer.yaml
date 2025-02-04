@@ -41,7 +41,7 @@ spec:
             limits:
               cpu: "500m"
               memory: "1Gi"
-          image: ghcr.io/s2-streamstore/stress-stream-rs@sha256:0a6a3626fd976312330e81b4eaf6dcddcaca8beedcf322a6a055aa9ea2252e54
+          image: ghcr.io/s2-streamstore/stress-stream-rs@sha256:b5de468a0e40f13666d7a4c2d34bd91c4f488645e0b398063d53eb07a68a9307
           ports:
             - name: metrics
               containerPort: 8000
@@ -56,9 +56,9 @@ spec:
           command:
             - "producer"
             - "--basin"
-            - "stress-basin"
+            - "stress-rs"
             - "--stream"
-            - "express-stream"
+            - "express"
             - "--throughput"
             - "10485760"
             - "--avg-record-size"
