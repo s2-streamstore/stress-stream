@@ -16,3 +16,5 @@ rustls = { version = "0.23.22", features = ["ring"] }
 futures = "0.3.31"
 axum = "0.8.1"
 mimalloc = "0.1.43"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing = "0.1.41"

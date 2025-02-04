@@ -7,9 +7,10 @@ use s2::{
 };
 use std::env;
 use stress_stream::{
-    current_timestamp, metrics_server, BASIN_LABEL, METRICS_NAMESPACE, STREAM_LABEL,
-    TIMESTAMP_HEADER_NUM_BYTES,
+    current_timestamp, init_rustls, init_tracing, metrics_server, BASIN_LABEL, METRICS_NAMESPACE,
+    STREAM_LABEL, TIMESTAMP_HEADER_NUM_BYTES,
 };
+use tracing::{error, info};
 
 fn read_records_counter(basin: String, stream: String) -> metrics::Counter {
     metrics::counter!(
@@ -95,6 +96,7 @@ async fn run_consumer(auth_token: String, basin: String, stream: String) -> eyre
         .basin_client(basin.clone().try_into()?)
         .stream_client(stream.clone());
     let mut start_seq_num = client.check_tail().await?;
+    info!("starting consumption");
     loop {
         let result = consume_records(
             basin.clone(),
@@ -104,6 +106,7 @@ async fn run_consumer(auth_token: String, basin: String, stream: String) -> eyre
         )
         .await;
         if result.is_err() {
+            error!(err=?result.err().unwrap(), "read session failed");
             read_session_failures_counter(basin.clone(), stream.clone()).increment(1);
         }
     }
@@ -119,9 +122,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
+    init_tracing();
+    init_rustls();
+
     let args = Args::parse();
     let auth_token = env::var("S2_AUTH_TOKEN").expect("S2_AUTH_TOKEN env var should be set");
     tokio::task::spawn(metrics_server());

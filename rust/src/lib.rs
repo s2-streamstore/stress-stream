@@ -3,6 +3,7 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use std::time::SystemTime;
+use tracing::info;
 
 pub const TIMESTAMP_HEADER_NUM_BYTES: u64 = 10;
 
@@ -16,7 +17,18 @@ pub fn current_timestamp() -> eyre::Result<f64> {
         .as_secs_f64())
 }
 
+pub fn init_tracing() {
+    tracing_subscriber::fmt::init();
+}
+
+pub fn init_rustls() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+}
+
 pub async fn metrics_server() -> eyre::Result<()> {
+    info!("starting metrics server");
     let handle = PrometheusBuilder::new()
         .set_buckets_for_metric(
             Matcher::Prefix("".to_string()),

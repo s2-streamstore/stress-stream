@@ -46,6 +46,8 @@ spec:
             - name: metrics
               containerPort: 8000
           env:
+            - name: RUST_LOG
+              value: "info"
             - name: S2_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -10,10 +10,11 @@ use s2::{
 use std::time::Instant;
 use std::{env, ops::Range, time::Duration};
 use stress_stream::{
-    current_timestamp, metrics_server, BASIN_LABEL, METRICS_NAMESPACE, STREAM_LABEL,
-    TIMESTAMP_HEADER_NUM_BYTES,
+    current_timestamp, init_rustls, init_tracing, metrics_server, BASIN_LABEL, METRICS_NAMESPACE,
+    STREAM_LABEL, TIMESTAMP_HEADER_NUM_BYTES,
 };
 use tokio::task::JoinSet;
+use tracing::{error, info};
 
 const CYCLES_PER_SEC: f64 = 10.0;
 
@@ -75,7 +76,8 @@ async fn append(
             appended_records_counter(basin.clone(), stream.clone())
                 .increment(output.end_seq_num - output.start_seq_num);
         }
-        Err(_) => {
+        Err(err) => {
+            error!(?err, "append request failed");
             append_failures_counter(basin.clone(), stream.clone()).increment(1);
         }
     }
@@ -151,6 +153,7 @@ async fn run_producer(
     let rng = rand::rngs::StdRng::from_os_rng();
     let per_cycle_target_num_bytes = (throughput as f64 * (1.0 / CYCLES_PER_SEC)) as u64;
     let mut cycle = tokio::time::interval(Duration::from_secs_f64(1.0 / CYCLES_PER_SEC));
+    info!("starting production cycles");
     loop {
         cycle.tick().await;
 
@@ -184,9 +187,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
+    init_tracing();
+    init_rustls();
+
     let args = Args::parse();
     let auth_token = env::var("S2_AUTH_TOKEN").expect("S2_AUTH_TOKEN env var should be set");
     let batch_size = if args.randomize {
