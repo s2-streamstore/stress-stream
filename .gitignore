@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# IDE related files
+.idea/
+
+# Rust-generated files
+rust/target/
