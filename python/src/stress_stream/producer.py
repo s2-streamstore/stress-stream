@@ -102,7 +102,7 @@ async def produce_records(
                 if (
                     batch_metered_bytes + record_metered_bytes
                     <= BATCH_MAX_METERED_BYTES
-                    and len(records) <= MAX_BATCH_SIZE
+                    and len(records) < MAX_BATCH_SIZE
                 ):
                     records.append(record)
                     batch_metered_bytes += record_metered_bytes
