@@ -105,8 +105,8 @@ async fn run_consumer(auth_token: String, basin: String, stream: String) -> eyre
             &mut start_seq_num,
         )
         .await;
-        if result.is_err() {
-            error!(err=?result.err().unwrap(), "read session failed");
+        if let Err(err) = result {
+            error!(?err, "read session failed");
             read_session_failures_counter(basin.clone(), stream.clone()).increment(1);
         }
     }
