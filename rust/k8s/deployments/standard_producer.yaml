@@ -60,7 +60,7 @@ spec:
             - "--stream"
             - "standard"
             - "--throughput"
-            - "10485760"
+            - "1048576"
             - "--avg-record-size"
             - "1024"
             - "--avg-batch-size"
