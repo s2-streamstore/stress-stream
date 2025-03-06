@@ -2,6 +2,7 @@ use clap::Parser;
 use eyre::eyre;
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
+use s2::client::S2Endpoints;
 use s2::types::{AppendInput, MeteredBytes};
 use s2::{
     types::{AppendRecord, AppendRecordBatch, Header},
@@ -146,7 +147,8 @@ async fn run_producer(
     batch_size: Range<u64>,
     record_body_size: Range<u64>,
 ) -> eyre::Result<()> {
-    let config = ClientConfig::new(auth_token);
+    let endpoints = S2Endpoints::from_env().map_err(|e| eyre!(e))?;
+    let config = ClientConfig::new(auth_token).with_endpoints(endpoints);
     let client = Client::new(config)
         .basin_client(basin.clone().try_into()?)
         .stream_client(stream.clone());

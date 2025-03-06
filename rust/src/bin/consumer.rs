@@ -2,6 +2,7 @@ use clap::Parser;
 use eyre::eyre;
 use futures::StreamExt;
 use s2::{
+    client::S2Endpoints,
     types::{ReadOutput, ReadSessionRequest},
     Client, ClientConfig, StreamClient,
 };
@@ -91,7 +92,8 @@ async fn consume_records(
 }
 
 async fn run_consumer(auth_token: String, basin: String, stream: String) -> eyre::Result<()> {
-    let config = ClientConfig::new(auth_token);
+    let endpoints = S2Endpoints::from_env().map_err(|e| eyre!(e))?;
+    let config = ClientConfig::new(auth_token).with_endpoints(endpoints);
     let client = Client::new(config)
         .basin_client(basin.clone().try_into()?)
         .stream_client(stream.clone());
