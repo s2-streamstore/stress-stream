@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-streamstore = "0.8.2"
+s2-sdk = "0.23.3"
 clap = { version = "4.5.27", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["full"] }
 metrics-exporter-prometheus = "0.16.2"
