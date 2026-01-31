@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: express-consumer
+  name: express-producer
   namespace: stress
   labels:
-    app.kubernetes.io/name: express-consumer
+    app.kubernetes.io/name: express-producer
     app.kubernetes.io/part-of: stress
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: express-consumer
+      app.kubernetes.io/name: express-producer
       app.kubernetes.io/part-of: stress
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: express-consumer
+        app.kubernetes.io/name: express-producer
         app.kubernetes.io/part-of: stress
     spec:
       affinity:
@@ -33,13 +33,13 @@ spec:
           value: "s2-loadtest"
           effect: "NoSchedule"
       containers:
-        - name: express-consumer
+        - name: express-producer
           resources:
             requests:
-              cpu: "1"
+              cpu: "500m"
               memory: "1Gi"
             limits:
-              cpu: "1"
+              cpu: "500m"
               memory: "1Gi"
           image: ghcr.io/s2-streamstore/stress-stream-rs@sha256:cc82517a97a040f70680c5d469d18ddb7d40b98660f52711b72468f41d0b22a2
           ports:
@@ -48,14 +48,21 @@ spec:
           env:
             - name: RUST_LOG
               value: "info"
-            - name: S2_AUTH_TOKEN
+            - name: S2_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: s2-auth-token
-                  key: s2-auth-token
+                  name: s2-access-token
+                  key: s2-access-token
           command:
-            - "consumer"
+            - "producer"
             - "--basin"
             - "stress-rs"
             - "--stream"
             - "express"
+            - "--throughput"
+            - "1048576"
+            - "--avg-record-size"
+            - "1024"
+            - "--avg-batch-size"
+            - "500"
+            - "--randomize"

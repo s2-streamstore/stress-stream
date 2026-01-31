@@ -1,10 +1,9 @@
 use clap::Parser;
 use eyre::eyre;
 use futures::StreamExt;
-use s2::{
-    client::S2Endpoints,
-    types::{ReadOutput, ReadSessionRequest},
-    Client, ClientConfig, StreamClient,
+use s2_sdk::{
+    types::{BasinName, ReadBatch, ReadFrom, ReadInput, ReadStart, S2Config, S2Endpoints, StreamName},
+    S2, S2Stream,
 };
 use std::env;
 use stress_stream::{
@@ -54,38 +53,33 @@ fn read_session_failures_counter(basin: String, stream: String) -> metrics::Coun
 }
 
 async fn consume_records(
-    basin: String,
-    stream: String,
-    client: StreamClient,
+    basin_name: BasinName,
+    stream_name: StreamName,
+    client: S2Stream,
     start_seq_num: &mut u64,
 ) -> eyre::Result<()> {
-    read_sessions_counter(basin.clone(), stream.clone()).increment(1);
-    let mut read_stream = client
-        .read_session(ReadSessionRequest::new(*start_seq_num))
-        .await?;
-    while let Some(output) = read_stream.next().await {
-        let output = output?;
-        match output {
-            ReadOutput::Batch(batch) => {
-                let mut batch_num_bytes = 0;
-                for record in &batch.records {
-                    if record.headers.len() != 1 {
-                        return Err(eyre!("Unexpected number of headers"));
-                    }
-                    let header = &record.headers[0];
-                    let created_ts = f64::from_be_bytes(header.value.as_ref().try_into()?);
-                    e2e_latency_histogram(basin.clone(), stream.clone())
-                        .record((current_timestamp()? - created_ts).max(0.0));
-                    batch_num_bytes += record.body.len() as u64 + TIMESTAMP_HEADER_NUM_BYTES;
-                }
-                read_bytes_counter(basin.clone(), stream.clone()).increment(batch_num_bytes);
-                read_records_counter(basin.clone(), stream.clone())
-                    .increment(batch.records.len() as u64);
-                if let Some(record) = batch.records.last() {
-                    *start_seq_num = record.seq_num + 1;
-                }
+    read_sessions_counter(basin_name.to_string(), stream_name.to_string()).increment(1);
+    let read_input = ReadInput::new().with_start(ReadStart::new().with_from(ReadFrom::SeqNum(*start_seq_num)));
+    let mut read_stream = client.read_session(read_input).await?;
+    while let Some(result) = read_stream.next().await {
+        let batch: ReadBatch = result?;
+        let mut batch_num_bytes = 0;
+        for record in &batch.records {
+            if record.headers.len() != 1 {
+                return Err(eyre!("Unexpected number of headers"));
             }
-            _ => return Err(eyre!("Unexpected output when reading from stream")),
+            let header = &record.headers[0];
+            let created_ts = f64::from_be_bytes(header.value.as_ref().try_into()?);
+            e2e_latency_histogram(basin_name.to_string(), stream_name.to_string())
+                .record((current_timestamp()? - created_ts).max(0.0));
+            batch_num_bytes += record.body.len() as u64 + TIMESTAMP_HEADER_NUM_BYTES;
+        }
+        read_bytes_counter(basin_name.to_string(), stream_name.to_string())
+            .increment(batch_num_bytes);
+        read_records_counter(basin_name.to_string(), stream_name.to_string())
+            .increment(batch.records.len() as u64);
+        if let Some(record) = batch.records.last() {
+            *start_seq_num = record.seq_num + 1;
         }
     }
     Ok(())
@@ -93,23 +87,27 @@ async fn consume_records(
 
 async fn run_consumer(auth_token: String, basin: String, stream: String) -> eyre::Result<()> {
     let endpoints = S2Endpoints::from_env().map_err(|e| eyre!(e))?;
-    let config = ClientConfig::new(auth_token).with_endpoints(endpoints);
-    let client = Client::new(config)
-        .basin_client(basin.clone().try_into()?)
-        .stream_client(stream.clone());
-    let mut start_seq_num = client.check_tail().await?;
+    let config = S2Config::new(auth_token).with_endpoints(endpoints);
+    let basin_name: BasinName = basin.parse()?;
+    let stream_name: StreamName = stream.parse()?;
+    let client = S2::new(config)?
+        .basin(basin_name.clone())
+        .stream(stream_name.clone());
+    let tail = client.check_tail().await?;
+    let mut start_seq_num = tail.seq_num;
     info!("starting consumption");
     loop {
         let result = consume_records(
-            basin.clone(),
-            stream.clone(),
+            basin_name.clone(),
+            stream_name.clone(),
             client.clone(),
             &mut start_seq_num,
         )
         .await;
         if let Err(err) = result {
             error!(?err, "read session failed");
-            read_session_failures_counter(basin.clone(), stream.clone()).increment(1);
+            read_session_failures_counter(basin_name.to_string(), stream_name.to_string())
+                .increment(1);
         }
     }
 }
@@ -128,7 +126,7 @@ async fn main() -> eyre::Result<()> {
     init_rustls();
 
     let args = Args::parse();
-    let auth_token = env::var("S2_AUTH_TOKEN").expect("S2_AUTH_TOKEN env var should be set");
+    let auth_token = env::var("S2_ACCESS_TOKEN").expect("S2_ACCESS_TOKEN env var should be set");
     tokio::task::spawn(metrics_server());
     run_consumer(auth_token, args.basin, args.stream).await?;
     Ok(())

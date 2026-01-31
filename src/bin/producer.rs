@@ -2,11 +2,12 @@ use clap::Parser;
 use eyre::eyre;
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
-use s2::client::S2Endpoints;
-use s2::types::{AppendInput, MeteredBytes};
-use s2::{
-    types::{AppendRecord, AppendRecordBatch, Header},
-    Client, ClientConfig, StreamClient,
+use s2_sdk::{
+    types::{
+        AppendInput, AppendRecord, AppendRecordBatch, BasinName, Header, MeteredBytes,
+        RECORD_BATCH_MAX, S2Config, S2Endpoints, StreamName,
+    },
+    S2, S2Stream,
 };
 use std::time::Instant;
 use std::{env, ops::Range, time::Duration};
@@ -47,7 +48,7 @@ fn appends_counter(basin: String, stream: String) -> metrics::Counter {
     metrics::counter!(
         format!("{METRICS_NAMESPACE}_appends_total"),
         BASIN_LABEL => basin,
-        STREAM_LABEL => stream
+        STREAM_LABEL => stream,
     )
 }
 
@@ -60,36 +61,37 @@ fn append_failures_counter(basin: String, stream: String) -> metrics::Counter {
 }
 
 async fn append(
-    basin: String,
-    stream: String,
-    client: StreamClient,
+    basin_name: BasinName,
+    stream_name: StreamName,
+    client: S2Stream,
     batch: AppendRecordBatch,
     batch_num_bytes: u64,
 ) -> eyre::Result<()> {
-    appends_counter(basin.clone(), stream.clone()).increment(1);
+    appends_counter(basin_name.to_string(), stream_name.to_string()).increment(1);
     let start = Instant::now();
     let result = client.append(AppendInput::new(batch)).await;
     match result {
         Ok(output) => {
-            append_latency_histogram(basin.clone(), stream.clone())
+            append_latency_histogram(basin_name.to_string(), stream_name.to_string())
                 .record(start.elapsed().as_secs_f64());
-            appended_bytes_counter(basin.clone(), stream.clone()).increment(batch_num_bytes);
-            appended_records_counter(basin.clone(), stream.clone())
-                .increment(output.end_seq_num - output.start_seq_num);
+            appended_bytes_counter(basin_name.to_string(), stream_name.to_string())
+                .increment(batch_num_bytes);
+            appended_records_counter(basin_name.to_string(), stream_name.to_string())
+                .increment(output.end.seq_num - output.start.seq_num);
         }
         Err(err) => {
             error!(?err, "append request failed");
-            append_failures_counter(basin.clone(), stream.clone()).increment(1);
+            append_failures_counter(basin_name.to_string(), stream_name.to_string()).increment(1);
         }
     }
     Ok(())
 }
 
 async fn produce_records(
-    basin: String,
-    stream: String,
+    basin_name: BasinName,
+    stream_name: StreamName,
     mut rng: StdRng,
-    client: StreamClient,
+    client: S2Stream,
     target_num_bytes: u64,
     batch_size: Range<u64>,
     record_body_size: Range<u64>,
@@ -98,8 +100,9 @@ async fn produce_records(
     let mut task_set = JoinSet::new();
     while total_num_bytes < target_num_bytes {
         let batch_size = rng.random_range(batch_size.clone());
-        let mut batch = AppendRecordBatch::new();
-        let mut batch_num_bytes = 0;
+        let mut records = Vec::new();
+        let mut batch_num_bytes = 0u64;
+        let mut batch_metered_bytes = 0usize;
         for _ in 0..batch_size {
             let body_size = rng.random_range(record_body_size.clone());
             let mut body = vec![0u8; body_size as usize];
@@ -110,12 +113,12 @@ async fn produce_records(
             )];
             let record = AppendRecord::new(body)?.with_headers(headers)?;
             let record_num_bytes = body_size + TIMESTAMP_HEADER_NUM_BYTES;
-            if batch.metered_bytes() + record.metered_bytes() <= AppendRecordBatch::MAX_BYTES
-                && batch.len() < AppendRecordBatch::MAX_CAPACITY
+            let record_metered = record.metered_bytes();
+            if batch_metered_bytes + record_metered <= RECORD_BATCH_MAX.bytes
+                && records.len() < RECORD_BATCH_MAX.count
             {
-                batch
-                    .push(record)
-                    .map_err(|_| eyre!("Appending to a batch failed"))?;
+                records.push(record);
+                batch_metered_bytes += record_metered;
                 batch_num_bytes += record_num_bytes;
                 total_num_bytes += record_num_bytes;
                 if total_num_bytes >= target_num_bytes {
@@ -125,10 +128,11 @@ async fn produce_records(
                 break;
             }
         }
-        if !batch.is_empty() {
+        if !records.is_empty() {
+            let batch = AppendRecordBatch::try_from_iter(records)?;
             task_set.spawn(append(
-                basin.clone(),
-                stream.clone(),
+                basin_name.clone(),
+                stream_name.clone(),
                 client.clone(),
                 batch,
                 batch_num_bytes,
@@ -148,10 +152,12 @@ async fn run_producer(
     record_body_size: Range<u64>,
 ) -> eyre::Result<()> {
     let endpoints = S2Endpoints::from_env().map_err(|e| eyre!(e))?;
-    let config = ClientConfig::new(auth_token).with_endpoints(endpoints);
-    let client = Client::new(config)
-        .basin_client(basin.clone().try_into()?)
-        .stream_client(stream.clone());
+    let config = S2Config::new(auth_token).with_endpoints(endpoints);
+    let basin_name: BasinName = basin.parse()?;
+    let stream_name: StreamName = stream.parse()?;
+    let client = S2::new(config)?
+        .basin(basin_name.clone())
+        .stream(stream_name.clone());
     let rng = rand::rngs::StdRng::from_os_rng();
     let per_cycle_target_num_bytes = (throughput as f64 * (1.0 / CYCLES_PER_SEC)) as u64;
     let mut cycle = tokio::time::interval(Duration::from_secs_f64(1.0 / CYCLES_PER_SEC));
@@ -160,8 +166,8 @@ async fn run_producer(
         cycle.tick().await;
 
         tokio::task::spawn(produce_records(
-            basin.clone(),
-            stream.clone(),
+            basin_name.clone(),
+            stream_name.clone(),
             rng.clone(),
             client.clone(),
             per_cycle_target_num_bytes,
@@ -193,7 +199,7 @@ async fn main() -> eyre::Result<()> {
     init_rustls();
 
     let args = Args::parse();
-    let auth_token = env::var("S2_AUTH_TOKEN").expect("S2_AUTH_TOKEN env var should be set");
+    let auth_token = env::var("S2_ACCESS_TOKEN").expect("S2_ACCESS_TOKEN env var should be set");
     let batch_size = if args.randomize {
         1..(args.avg_batch_size * 2 - 1)
     } else {
